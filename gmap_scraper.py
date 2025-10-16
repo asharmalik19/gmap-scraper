@@ -17,20 +17,20 @@ async def search(page, search_query):
     """Returns True if search results are found, False if redirected to a single business.
     Also checks for Google Captcha and raises an exception if detected.
     """
-    page.goto("https://www.google.com/maps")
-    page.fill("#searchboxinput", search_query)
-    page.keyboard.press("Enter")
-    page.wait_for_load_state("load")
+    await page.goto("https://www.google.com/maps")
+    await page.fill("#searchboxinput", search_query)
+    await page.keyboard.press("Enter")
+    await page.wait_for_load_state("load")
 
     # Check for captcha after search
-    if page.locator("div#captcha-form").count() > 0:
+    if await page.locator("div#captcha-form").count() > 0:
         logging.error("Google Captcha detected after search - automation blocked")
         raise Exception(
             "Google Captcha detected - please resolve captcha or try again later"
         )
      
     try:
-        if page.wait_for_selector("h1.DUwDvf.lfPIob", timeout=5000):
+        if await page.wait_for_selector("h1.DUwDvf.lfPIob", timeout=5000):
             logging.info(
                 f"Search '{search_query}' redirected to single business - skipping keyword"
             )
@@ -41,7 +41,7 @@ async def search(page, search_query):
     except TimeoutError:
         print(f"Search Results found for {search_query}")
 
-    if "Google Maps can't find" in page.content():
+    if "Google Maps can't find" in await page.content():
         logging.info(f"Search '{search_query}' returned no results - skipping keyword")
         print(f"Search '{search_query}' returned no results - skipping keyword")
         return None
@@ -50,12 +50,12 @@ async def search(page, search_query):
         f"div[aria-label='Results for {search_query}']", timeout=30000
     )
     await scroll(page, search_query)
-    business_links = get_links(page)
+    business_links = await get_links(page)
     return business_links
 
 
-def get_links(page):
-    results = page.locator("a.hfpxzc").all()
+async def get_links(page):
+    results = await page.locator("a.hfpxzc").all()
     result_links = [result.get_attribute("href") for result in results]
     return result_links
 
@@ -63,28 +63,28 @@ def get_links(page):
 async def scroll(page, search_query):
     sidebar = page.locator(f"div[aria-label='Results for {search_query}']")
     # implement the unstuck mechanism
-    previous_businesses = page.locator("a.hfpxzc").count()
+    previous_businesses = await page.locator("a.hfpxzc").count()
     last_check_time = time.time()
     check_interval = 3
 
     while True:
-        sidebar.press("PageDown")
-        page.wait_for_timeout(500)
-        sidebar.press("PageDown")
-        page.wait_for_timeout(500)
-        time.sleep(random.uniform(2, 3))  # the script seems to get stuck due to scrolling too fast
+        await sidebar.press("PageDown")
+        await page.wait_for_timeout(500)
+        await sidebar.press("PageDown")
+        await page.wait_for_timeout(500)
+        await asyncio.sleep(random.uniform(2, 3))  # the script seems to get stuck due to scrolling too fast
 
         current_time = time.time()
         if current_time - last_check_time >= check_interval:
-            current_businesses = page.locator("a.hfpxzc").count()
+            current_businesses = await page.locator("a.hfpxzc").count()
             if current_businesses == previous_businesses:
-                sidebar.locator("a.hfpxzc").last.click()
+                await sidebar.locator("a.hfpxzc").last.click()
                 logging.info("Unstuck mechanism triggered - clicking last result")
-                page.wait_for_timeout(2000)
+                await page.wait_for_timeout(2000)
             previous_businesses = current_businesses
             last_check_time = current_time
 
-        if "reached the end of the list" in page.content():
+        if "reached the end of the list" in await page.content():
             break
     return
 
@@ -193,13 +193,14 @@ def create_search_queries(locations, keywords):
 
 async def search_queries_in_parallel(search_queries, playwright):
     pages_and_queries = []
+    browser = await playwright.chromium.launch(headless=False)
     for query in search_queries:
-        browser = await playwright.chromium.launch(headless=False)
         context = await browser.new_context()
         page = await context.new_page()
         pages_and_queries.append((page, query))
     search_tasks = [search(page, query) for page, query in pages_and_queries]
     results = await asyncio.gather(*search_tasks)
+    return results
 
 
 async def main():

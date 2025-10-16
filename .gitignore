@@ -11,4 +11,4 @@ wheels/
 
 *.txt
 *.csv
-.log
+*.log
