@@ -10,9 +10,10 @@ import time
 import random
 
 from playwright.async_api import async_playwright
+import asyncio
 
 
-def search(page, search_query):
+async def search(page, search_query):
     """Returns True if search results are found, False if redirected to a single business.
     Also checks for Google Captcha and raises an exception if detected.
     """
@@ -36,19 +37,21 @@ def search(page, search_query):
             print(
                 f"Search '{search_query}' redirected to single business - skipping keyword"
             )
-            return False
+            return None
     except TimeoutError:
         print(f"Search Results found for {search_query}")
 
     if "Google Maps can't find" in page.content():
         logging.info(f"Search '{search_query}' returned no results - skipping keyword")
         print(f"Search '{search_query}' returned no results - skipping keyword")
-        return False
+        return None
 
     page.wait_for_selector(
         f"div[aria-label='Results for {search_query}']", timeout=30000
     )
-    return True
+    await scroll(page, search_query)
+    business_links = get_links(page)
+    return business_links
 
 
 def get_links(page):
@@ -57,7 +60,7 @@ def get_links(page):
     return result_links
 
 
-def scroll(page, search_query):
+async def scroll(page, search_query):
     sidebar = page.locator(f"div[aria-label='Results for {search_query}']")
     # implement the unstuck mechanism
     previous_businesses = page.locator("a.hfpxzc").count()
@@ -173,44 +176,47 @@ def get_business_timings(page_source):
     return business_hours
 
 
-async def search_keywords_in_location(keywords, location, page):
-    business_links_for_location = []
-    for keyword in keywords:
-        location = ", ".join(i for i in location.values())
-        search_query = keyword + " in " + location
-        search_results = search(page=page, search_query=search_query)
-        if not search_results:
-            continue
-        scroll(page=page, search_query=search_query)
-        business_links = get_links(page=page)
-        business_links_for_location.extend(business_links)
-    return business_links_for_location
+def create_search_queries(locations, keywords):
+    search_queries = []
+    for _, row in locations.iterrows():
+        location = {
+            "City": row["City"],
+            "State": row["State"],
+            "Country": row["Country"],
+        }
+        for keyword in keywords:
+            location_str = ", ".join(i for i in location.values())
+            search_query = keyword + " in " + location_str
+            search_queries.append(search_query)
+    return search_queries
+
+
+async def search_queries_in_parallel(search_queries, playwright):
+    pages_and_queries = []
+    for query in search_queries:
+        browser = await playwright.chromium.launch(headless=False)
+        context = await browser.new_context()
+        page = await context.new_page()
+        pages_and_queries.append((page, query))
+    search_tasks = [search(page, query) for page, query in pages_and_queries]
+    results = await asyncio.gather(*search_tasks)
 
 
 async def main():
     logging.basicConfig(filename="g_map_scraper.log", filemode="w", level=logging.INFO)
-    keyword_list = pd.read_csv("keywords.txt")
+    with open("keywords.txt", "r") as file:
+        keyword_list = file.read().splitlines()
     locations = pd.read_csv("locations.csv")
+    search_queries = create_search_queries(locations, keyword_list)
 
-    with async_playwright() as playwright:
-        chromium = playwright.chromium
-        browser = await chromium.launch(headless=False)
-        browser = playwright.chromium.launch(headless=False)
-        context = browser.new_context()
-        page = context.new_page()
+    async with async_playwright() as playwright:
+        results = await search_queries_in_parallel(search_queries, playwright)
 
-
-        # for keyword in keyword_list:
-        #         search_query = make_search_query(keyword=keyword, location=LOCATION)
-        #         # handles the case when the search is redirected to a business page
-        #         if not search(page=page, search_query=search_query):
-        #             continue
-        #         scroll(page=page, search_query=search_query)
-        #         result_links = get_links(page=page)
-
-
+    print(results)
+        
 
 if __name__ == "__main__":
+    asyncio.run(main())
     #     for city in cities:
     #         start_time = datetime.now()
     #         LOCATION = {"City": city, "State": "MD", "Country": "USA"}
