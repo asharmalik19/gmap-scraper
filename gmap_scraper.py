@@ -1,16 +1,17 @@
-from playwright.sync_api import sync_playwright
 import re
-import pandas as pd
-from datetime import datetime
+import asyncio
 import logging
-from bs4 import BeautifulSoup
-from playwright.sync_api import TimeoutError
-import stamina
 import time
 import random
 
-from playwright.async_api import async_playwright
-import asyncio
+from bs4 import BeautifulSoup
+import stamina
+import pandas as pd
+from patchright.async_api import async_playwright
+from patchright.async_api import TimeoutError
+
+
+BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
 
 
 async def search(page, search_query):
@@ -30,7 +31,7 @@ async def search(page, search_query):
         )
      
     try:
-        if await page.wait_for_selector("h1.DUwDvf.lfPIob", timeout=5000):
+        if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=10000):
             logging.info(
                 f"Search '{search_query}' redirected to single business - skipping keyword"
             )
@@ -46,7 +47,7 @@ async def search(page, search_query):
         print(f"Search '{search_query}' returned no results - skipping keyword")
         return None
 
-    page.wait_for_selector(
+    await page.wait_for_selector(
         f"div[aria-label='Results for {search_query}']", timeout=30000
     )
     await scroll(page, search_query)
@@ -56,7 +57,7 @@ async def search(page, search_query):
 
 async def get_links(page):
     results = await page.locator("a.hfpxzc").all()
-    result_links = [result.get_attribute("href") for result in results]
+    result_links = [await result.get_attribute("href") for result in results]
     return result_links
 
 
@@ -92,14 +93,14 @@ async def scroll(page, search_query):
 @stamina.retry(on=TimeoutError, attempts=2)
 def get_business_page_source(page, link):
     page.goto(link, timeout=30000)
-    business_title = page.locator("h1.DUwDvf.lfPIob")
+    business_title = page.locator(BUSINESS_TITLE_SELECTOR)
     business_title.wait_for(state="attached", timeout=10000)
     return page.content()
 
 
 def scrape_business_details(page_source):
     soup = BeautifulSoup(page_source, "html.parser")
-    business_title = soup.select_one("h1.DUwDvf.lfPIob").text.strip()
+    business_title = soup.select_one(BUSINESS_TITLE_SELECTOR).text.strip()
     business_title = business_title.replace('"', "").replace("'", "")
     business_type_elem = soup.select_one("button.DkEaL")
     business_type = business_type_elem.text.strip() if business_type_elem else ""
@@ -193,7 +194,7 @@ def create_search_queries(locations, keywords):
 
 async def search_queries_in_parallel(search_queries, playwright):
     pages_and_queries = []
-    browser = await playwright.chromium.launch(headless=False)
+    browser = await playwright.chromium.launch(headless=True)
     for query in search_queries:
         context = await browser.new_context()
         page = await context.new_page()
@@ -206,7 +207,7 @@ async def search_queries_in_parallel(search_queries, playwright):
 async def main():
     logging.basicConfig(filename="g_map_scraper.log", filemode="w", level=logging.INFO)
     with open("keywords.txt", "r") as file:
-        keyword_list = file.read().splitlines()
+        keyword_list = [line.strip() for line in file if line.strip()]
     locations = pd.read_csv("locations.csv")
     search_queries = create_search_queries(locations, keyword_list)
 
