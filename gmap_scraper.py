@@ -31,13 +31,14 @@ async def search(page, search_query):
         )
      
     try:
-        if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=10000):
+        if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=30000):
             logging.info(
                 f"Search '{search_query}' redirected to single business - skipping keyword"
             )
             print(
                 f"Search '{search_query}' redirected to single business - skipping keyword"
             )
+            await page.close()
             return None
     except TimeoutError:
         print(f"Search Results found for {search_query}")
@@ -45,6 +46,7 @@ async def search(page, search_query):
     if "Google Maps can't find" in await page.content():
         logging.info(f"Search '{search_query}' returned no results - skipping keyword")
         print(f"Search '{search_query}' returned no results - skipping keyword")
+        await page.close()
         return None
 
     await page.wait_for_selector(
@@ -52,6 +54,7 @@ async def search(page, search_query):
     )
     await scroll(page, search_query)
     business_links = await get_links(page)
+    await page.close()
     return business_links
 
 
@@ -73,7 +76,6 @@ async def scroll(page, search_query):
         await page.wait_for_timeout(500)
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
-        await asyncio.sleep(random.uniform(2, 3))  # the script seems to get stuck due to scrolling too fast
 
         current_time = time.time()
         if current_time - last_check_time >= check_interval:
@@ -81,7 +83,8 @@ async def scroll(page, search_query):
             if current_businesses == previous_businesses:
                 await sidebar.locator("a.hfpxzc").last.click()
                 logging.info("Unstuck mechanism triggered - clicking last result")
-                await page.wait_for_timeout(2000)
+                # await page.wait_for_timeout(2000)
+                await asyncio.sleep(10)
             previous_businesses = current_businesses
             last_check_time = current_time
 
@@ -194,7 +197,7 @@ def create_search_queries(locations, keywords):
 
 async def search_queries_in_parallel(search_queries, playwright):
     pages_and_queries = []
-    browser = await playwright.chromium.launch(headless=True)
+    browser = await playwright.chromium.launch(headless=False)
     for query in search_queries:
         context = await browser.new_context()
         page = await context.new_page()
