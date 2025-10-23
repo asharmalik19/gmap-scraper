@@ -7,8 +7,7 @@ import random
 from bs4 import BeautifulSoup
 import stamina
 import pandas as pd
-from patchright.async_api import async_playwright
-from patchright.async_api import TimeoutError
+from camoufox.async_api import AsyncCamoufox
 
 
 BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
@@ -195,12 +194,10 @@ def create_search_queries(locations, keywords):
     return search_queries
 
 
-async def search_queries_in_parallel(search_queries, playwright):
+async def search_queries_in_parallel(search_queries, browser):
     pages_and_queries = []
-    browser = await playwright.chromium.launch(headless=False)
     for query in search_queries:
-        context = await browser.new_context()
-        page = await context.new_page()
+        page = await browser.new_page()
         pages_and_queries.append((page, query))
     search_tasks = [search(page, query) for page, query in pages_and_queries]
     results = await asyncio.gather(*search_tasks)
@@ -214,8 +211,8 @@ async def main():
     locations = pd.read_csv("locations.csv")
     search_queries = create_search_queries(locations, keyword_list)
 
-    async with async_playwright() as playwright:
-        results = await search_queries_in_parallel(search_queries, playwright)
+    async with AsyncCamoufox() as browser:
+        results = await search_queries_in_parallel(search_queries, browser)
 
     print(results)
         
