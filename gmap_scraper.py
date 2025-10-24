@@ -8,9 +8,11 @@ from bs4 import BeautifulSoup
 import stamina
 import pandas as pd
 from camoufox.async_api import AsyncCamoufox
+from playwright.async_api import TimeoutError
 
 
 BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
+FEED_SELECTOR = "div[role=feed]"
 
 
 async def search(page, search_query):
@@ -23,12 +25,12 @@ async def search(page, search_query):
     await page.wait_for_load_state("load")
 
     # Check for captcha after search
-    if await page.locator("div#captcha-form").count() > 0:
-        logging.error("Google Captcha detected after search - automation blocked")
-        raise Exception(
-            "Google Captcha detected - please resolve captcha or try again later"
-        )
-     
+    # if await page.locator("div#captcha-form").count() > 0:
+    #     logging.error("Google Captcha detected after search - automation blocked")
+    #     raise Exception(
+    #         "Google Captcha detected - please resolve captcha or try again later"
+    #     )
+
     try:
         if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=30000):
             logging.info(
@@ -49,9 +51,9 @@ async def search(page, search_query):
         return None
 
     await page.wait_for_selector(
-        f"div[aria-label='Results for {search_query}']", timeout=30000
+        FEED_SELECTOR, timeout=30000
     )
-    await scroll(page, search_query)
+    await scroll(page)
     business_links = await get_links(page)
     await page.close()
     return business_links
@@ -63,30 +65,14 @@ async def get_links(page):
     return result_links
 
 
-async def scroll(page, search_query):
-    sidebar = page.locator(f"div[aria-label='Results for {search_query}']")
-    # implement the unstuck mechanism
-    previous_businesses = await page.locator("a.hfpxzc").count()
-    last_check_time = time.time()
-    check_interval = 3
-
+async def scroll(page):
+    sidebar = page.locator(FEED_SELECTOR)
     while True:
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
-
-        current_time = time.time()
-        if current_time - last_check_time >= check_interval:
-            current_businesses = await page.locator("a.hfpxzc").count()
-            if current_businesses == previous_businesses:
-                await sidebar.locator("a.hfpxzc").last.click()
-                logging.info("Unstuck mechanism triggered - clicking last result")
-                # await page.wait_for_timeout(2000)
-                await asyncio.sleep(10)
-            previous_businesses = current_businesses
-            last_check_time = current_time
-
+        await asyncio.sleep(5)
         if "reached the end of the list" in await page.content():
             break
     return
@@ -198,6 +184,7 @@ async def search_queries_in_parallel(search_queries, browser):
     pages_and_queries = []
     for query in search_queries:
         page = await browser.new_page()
+        await asyncio.sleep(random.uniform(2, 4))
         pages_and_queries.append((page, query))
     search_tasks = [search(page, query) for page, query in pages_and_queries]
     results = await asyncio.gather(*search_tasks)
@@ -211,74 +198,11 @@ async def main():
     locations = pd.read_csv("locations.csv")
     search_queries = create_search_queries(locations, keyword_list)
 
-    async with AsyncCamoufox() as browser:
+    async with AsyncCamoufox(headless=True) as browser:
         results = await search_queries_in_parallel(search_queries, browser)
 
     print(results)
-        
+
 
 if __name__ == "__main__":
     asyncio.run(main())
-    #     for city in cities:
-    #         start_time = datetime.now()
-    #         LOCATION = {"City": city, "State": "MD", "Country": "USA"}
-    #         data_df = pd.DataFrame(
-    #             columns=[
-    #                 "Company_Name",
-    #                 "Number",
-    #                 "Full_Address",
-    #                 "Gmaps_Domains",
-    #                 "Website",
-    #                 "Business_Type_Gmaps",
-    #                 "Business_Status",
-    #                 "Monday",
-    #                 "Tuesday",
-    #                 "Wednesday",
-    #                 "Thursday",
-    #                 "Friday",
-    #                 "Saturday",
-    #                 "Sunday",
-    #                 "Gmaps_Links",
-    #                 "State",
-    #                 "Searched_Keywords",
-    #             ]
-    #         )
-
-    #         for keyword in keyword_list:
-    #             search_query = make_search_query(keyword=keyword, location=LOCATION)
-    #             # handles the case when the search is redirected to a business page
-    #             if not search(page=page, search_query=search_query):
-    #                 continue
-    #             scroll(page=page, search_query=search_query)
-    #             result_links = get_links(page=page)
-
-    #             for link in result_links:
-    #                 try:
-    #                     page_source = get_business_page_source(page=page, link=link)
-    #                 except TimeoutError:
-    #                     logging.error(
-    #                         f"Timeout Error: Unable to load page for link {link}"
-    #                     )
-    #                     print(f"Timeout Error: Unable to load page for link {link}")
-    #                     continue
-    #                 business_details = scrape_business_details(page_source=page_source)
-    #                 business_details.update(
-    #                     {
-    #                         "Gmaps_Links": link,
-    #                         "State": LOCATION["State"],
-    #                         "Searched_Keywords": keyword,
-    #                     }
-    #                 )
-    #                 data_df.loc[len(data_df)] = business_details
-    #                 print(f"Scraped: {business_details}")
-    #                 print("-" * 50)
-
-    #         data_df_without_duplicates = remove_duplicates(data_df=data_df)
-    #         data_df_without_duplicates.to_excel(f"{city}.xlsx", index=False)
-    #         logging.warning(
-    #             f"Scraping completed for {city}. Total execution time: {datetime.now() - start_time}"
-    #         )
-    #         print(f"Completed scraping {city}")
-
-    #     browser.close()
-    # print(f"Total execution time: {datetime.now() - start_time}")
