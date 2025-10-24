@@ -191,6 +191,12 @@ async def search_queries_in_parallel(search_queries, browser):
     return results
 
 
+async def create_workers(num_workers=4):
+    async with AsyncCamoufox(headless=True) as browser:
+        for _ in range(num_workers):
+            await browser.new_page()
+            
+
 async def main():
     logging.basicConfig(filename="g_map_scraper.log", filemode="w", level=logging.INFO)
     with open("keywords.txt", "r") as file:
