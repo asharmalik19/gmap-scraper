@@ -15,50 +15,6 @@ BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
 FEED_SELECTOR = "div[role=feed]"
 
 
-async def search(page, search_query):
-    """Returns True if search results are found, False if redirected to a single business.
-    Also checks for Google Captcha and raises an exception if detected.
-    """
-    await page.goto("https://www.google.com/maps")
-    await page.fill("#searchboxinput", search_query)
-    await page.keyboard.press("Enter")
-    await page.wait_for_load_state("load")
-
-    # Check for captcha after search
-    # if await page.locator("div#captcha-form").count() > 0:
-    #     logging.error("Google Captcha detected after search - automation blocked")
-    #     raise Exception(
-    #         "Google Captcha detected - please resolve captcha or try again later"
-    #     )
-
-    try:
-        if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=30000):
-            logging.info(
-                f"Search '{search_query}' redirected to single business - skipping keyword"
-            )
-            print(
-                f"Search '{search_query}' redirected to single business - skipping keyword"
-            )
-            await page.close()
-            return None
-    except TimeoutError:
-        print(f"Search Results found for {search_query}")
-
-    if "Google Maps can't find" in await page.content():
-        logging.info(f"Search '{search_query}' returned no results - skipping keyword")
-        print(f"Search '{search_query}' returned no results - skipping keyword")
-        await page.close()
-        return None
-
-    await page.wait_for_selector(
-        FEED_SELECTOR, timeout=30000
-    )
-    await scroll(page)
-    business_links = await get_links(page)
-    await page.close()
-    return business_links
-
-
 async def get_links(page):
     results = await page.locator("a.hfpxzc").all()
     result_links = [await result.get_attribute("href") for result in results]
@@ -72,7 +28,7 @@ async def scroll(page):
         await page.wait_for_timeout(500)
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
-        await asyncio.sleep(5)
+        await asyncio.sleep(6)
         if "reached the end of the list" in await page.content():
             break
     return
@@ -165,8 +121,8 @@ def get_business_timings(page_source):
     return business_hours
 
 
-def create_search_queries(locations, keywords):
-    search_queries = []
+def create_search_queries(locations, keywords) -> asyncio.Queue:
+    search_queries = asyncio.Queue()
     for _, row in locations.iterrows():
         location = {
             "City": row["City"],
@@ -176,38 +132,87 @@ def create_search_queries(locations, keywords):
         for keyword in keywords:
             location_str = ", ".join(i for i in location.values())
             search_query = keyword + " in " + location_str
-            search_queries.append(search_query)
+            search_queries.put_nowait(search_query)
     return search_queries
 
 
-async def search_queries_in_parallel(search_queries, browser):
-    pages_and_queries = []
-    for query in search_queries:
-        page = await browser.new_page()
-        await asyncio.sleep(random.uniform(2, 4))
-        pages_and_queries.append((page, query))
-    search_tasks = [search(page, query) for page, query in pages_and_queries]
-    results = await asyncio.gather(*search_tasks)
-    return results
+async def search(page, search_query):
+    """Returns True if search results are found, False if redirected to a single business.
+    Also checks for Google Captcha and raises an exception if detected.
+    """
+    await page.goto("https://www.google.com/maps")
+    await page.fill("#searchboxinput", search_query)
+    await page.keyboard.press("Enter")
+    await page.wait_for_load_state("load")
+
+    # Check for captcha after search
+    # if await page.locator("div#captcha-form").count() > 0:
+    #     logging.error("Google Captcha detected after search - automation blocked")
+    #     raise Exception(
+    #         "Google Captcha detected - please resolve captcha or try again later"
+    #     )
+
+    try:
+        if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=30000):
+            logging.info(
+                f"Search '{search_query}' redirected to single business - skipping keyword"
+            )
+            print(
+                f"Search '{search_query}' redirected to single business - skipping keyword"
+            )
+            await page.close()
+            return None
+    except TimeoutError:
+        print(f"Search Results found for {search_query}")
+
+    if "Google Maps can't find" in await page.content():
+        logging.info(f"Search '{search_query}' returned no results - skipping keyword")
+        print(f"Search '{search_query}' returned no results - skipping keyword")
+        await page.close()
+        return None
+
+    await page.wait_for_selector(
+        FEED_SELECTOR, timeout=30000
+    )
+    await scroll(page)
+    business_links = await get_links(page)
+    await page.close()
+    return business_links
 
 
-async def create_workers(num_workers=4):
-    async with AsyncCamoufox(headless=True) as browser:
-        for _ in range(num_workers):
-            await browser.new_page()
-            
+async def search_worker(page, search_queries_queue, business_links_queue):
+    """This function is responsible for calling the seach function for search queries from the queue
+     using the provided page object. Multiple instances of this function runs concurrently for each page object"""
+    while True:
+        if search_queries_queue.empty():
+            break
+        search_query = await search_queries_queue.get()
+        links = await search(page, search_query)
+        await business_links_queue.put(links)
+
 
 async def main():
+    NUMBER_OF_PAGES = 4
     logging.basicConfig(filename="g_map_scraper.log", filemode="w", level=logging.INFO)
     with open("keywords.txt", "r") as file:
         keyword_list = [line.strip() for line in file if line.strip()]
     locations = pd.read_csv("locations.csv")
-    search_queries = create_search_queries(locations, keyword_list)
+    search_queries_queue = create_search_queries(locations, keyword_list)
+    business_links_queue = asyncio.Queue()
 
-    async with AsyncCamoufox(headless=True) as browser:
-        results = await search_queries_in_parallel(search_queries, browser)
+    async with AsyncCamoufox(headless=False) as browser:
+        pages = []
+        for _ in range(NUMBER_OF_PAGES):
+            page = await browser.new_page()
+            pages.append(page)
+            await asyncio.sleep(2)
+        search_tasks = [search_worker(page, search_queries_queue, business_links_queue) for page in pages]
+        await asyncio.gather(*search_tasks)
 
-    print(results)
+        for _ in range(10):
+            link = await business_links_queue.get()
+            print(link)
+        await browser.close()
 
 
 if __name__ == "__main__":
