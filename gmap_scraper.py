@@ -22,13 +22,15 @@ async def get_links(page):
 
 
 async def scroll(page):
+    """Scrolls through the page until the end. Google maps scroll can sometimes
+    get stuck"""
     sidebar = page.locator(FEED_SELECTOR)
     while True:
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
-        await asyncio.sleep(6)
+        await asyncio.sleep(random.uniform(5, 7))
         if "reached the end of the list" in await page.content():
             break
     return
@@ -145,13 +147,6 @@ async def search(page, search_query):
     await page.keyboard.press("Enter")
     await page.wait_for_load_state("load")
 
-    # Check for captcha after search
-    # if await page.locator("div#captcha-form").count() > 0:
-    #     logging.error("Google Captcha detected after search - automation blocked")
-    #     raise Exception(
-    #         "Google Captcha detected - please resolve captcha or try again later"
-    #     )
-
     try:
         if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=30000):
             logging.info(
@@ -171,24 +166,24 @@ async def search(page, search_query):
         await page.close()
         return None
 
-    await page.wait_for_selector(
-        FEED_SELECTOR, timeout=30000
-    )
+    await page.wait_for_selector(FEED_SELECTOR, timeout=30000)
     await scroll(page)
     business_links = await get_links(page)
-    await page.close()
     return business_links
 
 
 async def search_worker(page, search_queries_queue, business_links_queue):
     """This function is responsible for calling the seach function for search queries from the queue
-     using the provided page object. Multiple instances of this function runs concurrently for each page object"""
+    using the provided page object. Multiple instances of this function runs concurrently with page objects
+    """
     while True:
-        if search_queries_queue.empty():
-            break
         search_query = await search_queries_queue.get()
+        if search_query is None:
+            break
         links = await search(page, search_query)
-        await business_links_queue.put(links)
+        for link in links:
+            await business_links_queue.put(link)
+        search_queries_queue.task_done()
 
 
 async def main():
@@ -206,12 +201,22 @@ async def main():
             page = await browser.new_page()
             pages.append(page)
             await asyncio.sleep(2)
-        search_tasks = [search_worker(page, search_queries_queue, business_links_queue) for page in pages]
+
+        search_tasks = []
+        for page in pages:
+            search_task = asyncio.create_task(
+                search_worker(page, search_queries_queue, business_links_queue)
+            )
+            search_tasks.append(search_task)
+        await search_queries_queue.join()
+        for _ in range(NUMBER_OF_PAGES):
+            await search_queries_queue.put(None)
         await asyncio.gather(*search_tasks)
 
         for _ in range(10):
             link = await business_links_queue.get()
             print(link)
+        print(f"queue size: {business_links_queue.qsize()}")
         await browser.close()
 
 
