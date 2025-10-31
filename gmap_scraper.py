@@ -37,11 +37,11 @@ async def scroll(page):
 
 
 @stamina.retry(on=TimeoutError, attempts=2)
-def get_business_page_source(page, link):
-    page.goto(link, timeout=30000)
+async def get_business_page_source(page, link):
+    await page.goto(link, timeout=30000)
     business_title = page.locator(BUSINESS_TITLE_SELECTOR)
-    business_title.wait_for(state="attached", timeout=10000)
-    return page.content()
+    await business_title.wait_for(state="attached", timeout=10000)
+    return await page.content()
 
 
 def scrape_business_details(page_source):
@@ -185,6 +185,16 @@ async def search_worker(page, search_queries_queue, business_links_queue):
             await business_links_queue.put(link)
         search_queries_queue.task_done()
 
+    
+async def page_source_worker(page, business_links_queue, page_source_queue):
+    while True:
+        link = await business_links_queue.get()
+        if link is None:
+            break
+        page_source = await get_business_page_source(page, link)
+        await page_source_queue.put(page_source)
+        business_links_queue.task_done()
+
 
 async def main():
     NUMBER_OF_PAGES = 4
@@ -194,8 +204,9 @@ async def main():
     locations = pd.read_csv("locations.csv")
     search_queries_queue = create_search_queries(locations, keyword_list)
     business_links_queue = asyncio.Queue()
+    page_source_queue = asyncio.Queue()
 
-    async with AsyncCamoufox(headless=False) as browser:
+    async with AsyncCamoufox(headless=True) as browser:
         pages = []
         for _ in range(NUMBER_OF_PAGES):
             page = await browser.new_page()
@@ -211,12 +222,24 @@ async def main():
         await search_queries_queue.join()
         for _ in range(NUMBER_OF_PAGES):
             await search_queries_queue.put(None)
-        await asyncio.gather(*search_tasks)
+        await asyncio.gather(*search_tasks)       
 
-        for _ in range(10):
-            link = await business_links_queue.get()
-            print(link)
-        print(f"queue size: {business_links_queue.qsize()}")
+        get_page_source_tasks = []
+        for page in pages:
+            page_source_task = asyncio.create_task(
+                page_source_worker(page, business_links_queue, page_source_queue)
+            )
+            get_page_source_tasks.append(page_source_task)
+        await business_links_queue.join()
+        for _ in range(NUMBER_OF_PAGES):
+            await page_source_queue.put(None)
+        await asyncio.gather(*get_page_source_tasks)
+
+        for _ in range(1):
+            page_source = await page_source_queue.get()
+            print(page_source)
+        print(page_source_queue.qsize())
+
         await browser.close()
 
 
