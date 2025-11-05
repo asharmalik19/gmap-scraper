@@ -11,6 +11,14 @@ from camoufox.async_api import AsyncCamoufox
 from playwright.async_api import TimeoutError
 
 
+logging.basicConfig(
+    filename="gmap_scraper.log",
+    filemode="w",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+
 BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
 FEED_SELECTOR = "div[role=feed]"
 
@@ -36,9 +44,14 @@ async def scroll(page):
     return
 
 
-@stamina.retry(on=TimeoutError, attempts=2)
+# @stamina.retry(on=TimeoutError, attempts=2)
 async def get_business_page_source(page, link):
-    await page.goto(link, timeout=30000)
+    logging.info(f"Fetching page source for link: {link}")
+    try:
+        await page.goto(link, timeout=30000)
+    except Exception as e:
+        logging.error(f"Error {e} while fetching page source for link: {link}")
+        return None
     business_title = page.locator(BUSINESS_TITLE_SELECTOR)
     await business_title.wait_for(state="attached", timeout=10000)
     return await page.content()
@@ -138,35 +151,21 @@ def create_search_queries(locations, keywords) -> asyncio.Queue:
     return search_queries
 
 
+# NOTE: I am assuming that playwright would wait for the feed selector in valid case 
+# and throw timeout in invalid cases
 async def search(page, search_query):
-    """Returns True if search results are found, False if redirected to a single business.
-    Also checks for Google Captcha and raises an exception if detected.
-    """
     await page.goto("https://www.google.com/maps")
     await page.fill("#searchboxinput", search_query)
     await page.keyboard.press("Enter")
     await page.wait_for_load_state("load")
-
     try:
-        if await page.wait_for_selector(BUSINESS_TITLE_SELECTOR, timeout=30000):
-            logging.info(
-                f"Search '{search_query}' redirected to single business - skipping keyword"
-            )
-            print(
-                f"Search '{search_query}' redirected to single business - skipping keyword"
-            )
-            await page.close()
-            return None
-    except TimeoutError:
+        await page.locator(FEED_SELECTOR).wait_for(timeout=30000)
+        logging.info(f"Search Results found for {search_query}")
         print(f"Search Results found for {search_query}")
-
-    if "Google Maps can't find" in await page.content():
-        logging.info(f"Search '{search_query}' returned no results - skipping keyword")
-        print(f"Search '{search_query}' returned no results - skipping keyword")
-        await page.close()
+    except TimeoutError:
+        logging.warning(f"Search '{search_query}' returned no results - skipping query: Invalid case")
+        print(f"Search '{search_query}' returned no results - skipping query: Invalid case")
         return None
-
-    await page.wait_for_selector(FEED_SELECTOR, timeout=30000)
     await scroll(page)
     business_links = await get_links(page)
     return business_links
@@ -192,6 +191,7 @@ async def page_source_worker(page, business_links_queue, page_source_queue):
         if link is None:
             break
         page_source = await get_business_page_source(page, link)
+        logging.info(f"Successfully fetched page source for {link}")
         await page_source_queue.put(page_source)
         business_links_queue.task_done()
 
@@ -205,8 +205,8 @@ async def main():
     search_queries_queue = create_search_queries(locations, keyword_list)
     business_links_queue = asyncio.Queue()
     page_source_queue = asyncio.Queue()
-
-    async with AsyncCamoufox(headless=True) as browser:
+    logging.info(f"Processing search queries: {search_queries_queue.qsize()}")
+    async with AsyncCamoufox(headless=False) as browser:
         pages = []
         for _ in range(NUMBER_OF_PAGES):
             page = await browser.new_page()
@@ -220,9 +220,12 @@ async def main():
             )
             search_tasks.append(search_task)
         await search_queries_queue.join()
+
+        # poison pill for each page object to exit search tasks properly
         for _ in range(NUMBER_OF_PAGES):
             await search_queries_queue.put(None)
-        await asyncio.gather(*search_tasks)       
+        await asyncio.gather(*search_tasks)    
+        logging.info(f"Total number of business links: {business_links_queue.qsize()}")   
 
         get_page_source_tasks = []
         for page in pages:
@@ -230,11 +233,13 @@ async def main():
                 page_source_worker(page, business_links_queue, page_source_queue)
             )
             get_page_source_tasks.append(page_source_task)
+            
         await business_links_queue.join()
         for _ in range(NUMBER_OF_PAGES):
             await page_source_queue.put(None)
         await asyncio.gather(*get_page_source_tasks)
 
+        # TEMP
         for _ in range(1):
             page_source = await page_source_queue.get()
             print(page_source)
