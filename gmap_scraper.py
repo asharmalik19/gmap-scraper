@@ -44,19 +44,6 @@ async def scroll(page):
     return
 
 
-# @stamina.retry(on=TimeoutError, attempts=2)
-async def get_business_page_source(page, link):
-    logging.info(f"Fetching page source for link: {link}")
-    try:
-        await page.goto(link, timeout=30000)
-    except Exception as e:
-        logging.error(f"Error {e} while fetching page source for link: {link}")
-        return None
-    business_title = page.locator(BUSINESS_TITLE_SELECTOR)
-    await business_title.wait_for(state="attached", timeout=10000)
-    return await page.content()
-
-
 def scrape_business_details(page_source):
     soup = BeautifulSoup(page_source, "html.parser")
     business_title = soup.select_one(BUSINESS_TITLE_SELECTOR).text.strip()
@@ -149,6 +136,18 @@ def create_search_queries(locations, keywords) -> asyncio.Queue:
             search_query = keyword + " in " + location_str
             search_queries.put_nowait(search_query)
     return search_queries
+
+
+@stamina.retry(on=Exception, attempts=2)
+async def get_business_page_source(page, link):
+    logging.info(f"Fetching page source for link: {link}")
+    try:
+        await page.goto(link, timeout=30000)
+    except Exception as e:
+        logging.error(f"Error while navigating to the page link: {link}: {e}")
+        return None
+    await page.locator(BUSINESS_TITLE_SELECTOR).wait_for()
+    return await page.content()
 
 
 # NOTE: I am assuming that playwright would wait for the feed selector in valid case 
