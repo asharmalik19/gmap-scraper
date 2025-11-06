@@ -21,6 +21,7 @@ logging.basicConfig(
 
 BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
 FEED_SELECTOR = "div[role=feed]"
+NUMBER_OF_PAGES = 4
 
 
 async def get_links(page):
@@ -123,7 +124,10 @@ def get_business_timings(page_source):
     return business_hours
 
 
-def create_search_queries(locations, keywords) -> asyncio.Queue:
+def create_search_queries() -> asyncio.Queue:
+    with open("keywords.txt", "r") as file:
+        keyword_list = [line.strip() for line in file if line.strip()]
+    locations = pd.read_csv("locations.csv")
     search_queries = asyncio.Queue()
     for _, row in locations.iterrows():
         location = {
@@ -131,7 +135,7 @@ def create_search_queries(locations, keywords) -> asyncio.Queue:
             "State": row["State"],
             "Country": row["Country"],
         }
-        for keyword in keywords:
+        for keyword in keyword_list:
             location_str = ", ".join(i for i in location.values())
             search_query = keyword + " in " + location_str
             search_queries.put_nowait(search_query)
@@ -150,8 +154,6 @@ async def get_business_page_source(page, link):
     return await page.content()
 
 
-# NOTE: I am assuming that playwright would wait for the feed selector in valid case 
-# and throw timeout in invalid cases
 async def search(page, search_query):
     await page.goto("https://www.google.com/maps")
     await page.fill("#searchboxinput", search_query)
@@ -195,56 +197,57 @@ async def page_source_worker(page, business_links_queue, page_source_queue):
         business_links_queue.task_done()
 
 
-async def main():
-    NUMBER_OF_PAGES = 4
-    logging.basicConfig(filename="g_map_scraper.log", filemode="w", level=logging.INFO)
-    with open("keywords.txt", "r") as file:
-        keyword_list = [line.strip() for line in file if line.strip()]
-    locations = pd.read_csv("locations.csv")
-    search_queries_queue = create_search_queries(locations, keyword_list)
-    business_links_queue = asyncio.Queue()
-    page_source_queue = asyncio.Queue()
-    logging.info(f"Processing search queries: {search_queries_queue.qsize()}")
+async def setup_browser():
     async with AsyncCamoufox(headless=False) as browser:
         pages = []
         for _ in range(NUMBER_OF_PAGES):
             page = await browser.new_page()
             pages.append(page)
             await asyncio.sleep(2)
+    return browser, pages
 
-        search_tasks = []
-        for page in pages:
-            search_task = asyncio.create_task(
-                search_worker(page, search_queries_queue, business_links_queue)
-            )
-            search_tasks.append(search_task)
-        await search_queries_queue.join()
 
-        # poison pill for each page object to exit search tasks properly
-        for _ in range(NUMBER_OF_PAGES):
-            await search_queries_queue.put(None)
-        await asyncio.gather(*search_tasks)    
-        logging.info(f"Total number of business links: {business_links_queue.qsize()}")   
+async def main():
+    logging.basicConfig(filename="g_map_scraper.log", filemode="w", level=logging.INFO)
+    search_queries_queue = create_search_queries()
+    business_links_queue = asyncio.Queue()
+    page_source_queue = asyncio.Queue()
+    logging.info(f"Processing search queries: {search_queries_queue.qsize()}")  
+    browser, pages = await setup_browser()
+    
+    search_tasks = []
+    for page in pages:
+        search_task = asyncio.create_task(
+            search_worker(page, search_queries_queue, business_links_queue)
+        )
+        search_tasks.append(search_task)
+    await search_queries_queue.join()
 
-        get_page_source_tasks = []
-        for page in pages:
-            page_source_task = asyncio.create_task(
-                page_source_worker(page, business_links_queue, page_source_queue)
-            )
-            get_page_source_tasks.append(page_source_task)
-            
-        await business_links_queue.join()
-        for _ in range(NUMBER_OF_PAGES):
-            await page_source_queue.put(None)
-        await asyncio.gather(*get_page_source_tasks)
+    # poison pill for each page object to exit search tasks properly
+    for _ in range(NUMBER_OF_PAGES):
+        await search_queries_queue.put(None)
+    await asyncio.gather(*search_tasks)    
+    logging.info(f"Total number of business links: {business_links_queue.qsize()}")   
 
-        # TEMP
-        for _ in range(1):
-            page_source = await page_source_queue.get()
-            print(page_source)
-        print(page_source_queue.qsize())
+    get_page_source_tasks = []
+    for page in pages:
+        page_source_task = asyncio.create_task(
+            page_source_worker(page, business_links_queue, page_source_queue)
+        )
+        get_page_source_tasks.append(page_source_task)
+        
+    await business_links_queue.join()
+    for _ in range(NUMBER_OF_PAGES):
+        await page_source_queue.put(None)
+    await asyncio.gather(*get_page_source_tasks)
 
-        await browser.close()
+    # TEMP
+    for _ in range(1):
+        page_source = await page_source_queue.get()
+        print(page_source)
+    print(page_source_queue.qsize())
+
+    await browser.close()
 
 
 if __name__ == "__main__":
