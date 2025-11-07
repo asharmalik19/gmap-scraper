@@ -154,7 +154,7 @@ async def get_business_page_source(page, link):
     return await page.content()
 
 
-async def search(page, search_query):
+async def search(page, search_query) -> list[str] | None:
     await page.goto("https://www.google.com/maps")
     await page.fill("#searchboxinput", search_query)
     await page.keyboard.press("Enter")
@@ -181,8 +181,9 @@ async def search_worker(page, search_queries_queue, business_links_queue):
         if search_query is None:
             break
         links = await search(page, search_query)
-        for link in links:
-            await business_links_queue.put(link)
+        if links:
+            for link in links:
+                await business_links_queue.put(link)
         search_queries_queue.task_done()
 
     
@@ -197,14 +198,17 @@ async def page_source_worker(page, business_links_queue, page_source_queue):
         business_links_queue.task_done()
 
 
-async def setup_browser():
-    async with AsyncCamoufox(headless=False) as browser:
-        pages = []
-        for _ in range(NUMBER_OF_PAGES):
-            page = await browser.new_page()
-            pages.append(page)
-            await asyncio.sleep(2)
-    return browser, pages
+async def map_pages_to_worker(pages, input_queue, output_queue, worker):
+    """The job of this function is to start the workers. When the workers 
+    job is done and the input queue is empty, close the workers."""
+    task_list = []
+    for page in pages:
+        task = asyncio.create_task(worker(page, input_queue, output_queue))
+        task_list.append(task)
+    await input_queue.join()
+    for _ in range(NUMBER_OF_PAGES):
+        await input_queue.put(None)
+    await asyncio.gather(*task_list)
 
 
 async def main():
@@ -213,42 +217,16 @@ async def main():
     business_links_queue = asyncio.Queue()
     page_source_queue = asyncio.Queue()
     logging.info(f"Processing search queries: {search_queries_queue.qsize()}")  
-    browser, pages = await setup_browser()
-    
-    search_tasks = []
-    for page in pages:
-        search_task = asyncio.create_task(
-            search_worker(page, search_queries_queue, business_links_queue)
-        )
-        search_tasks.append(search_task)
-    await search_queries_queue.join()
-
-    # poison pill for each page object to exit search tasks properly
-    for _ in range(NUMBER_OF_PAGES):
-        await search_queries_queue.put(None)
-    await asyncio.gather(*search_tasks)    
-    logging.info(f"Total number of business links: {business_links_queue.qsize()}")   
-
-    get_page_source_tasks = []
-    for page in pages:
-        page_source_task = asyncio.create_task(
-            page_source_worker(page, business_links_queue, page_source_queue)
-        )
-        get_page_source_tasks.append(page_source_task)
+    async with AsyncCamoufox(headless=False) as browser:
+        pages = []
+        for _ in range(NUMBER_OF_PAGES):
+            page = await browser.new_page()
+            pages.append(page)
+            await asyncio.sleep(2)
         
-    await business_links_queue.join()
-    for _ in range(NUMBER_OF_PAGES):
-        await page_source_queue.put(None)
-    await asyncio.gather(*get_page_source_tasks)
-
-    # TEMP
-    for _ in range(1):
-        page_source = await page_source_queue.get()
-        print(page_source)
-    print(page_source_queue.qsize())
-
-    await browser.close()
-
+        await map_pages_to_worker(pages, search_queries_queue, business_links_queue, search_worker)
+        logging.info(f"Num of business links: {business_links_queue.qsize()}")
+        
 
 if __name__ == "__main__":
     asyncio.run(main())
