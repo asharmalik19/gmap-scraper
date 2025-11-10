@@ -144,7 +144,6 @@ def create_search_queries() -> asyncio.Queue:
 
 @stamina.retry(on=Exception, attempts=2)
 async def get_business_page_source(page, link):
-    logging.info(f"Fetching page source for link: {link}")
     try:
         await page.goto(link, timeout=30000)
     except Exception as e:
@@ -198,7 +197,7 @@ async def page_source_worker(page, business_links_queue, page_source_queue):
         business_links_queue.task_done()
 
 
-async def map_pages_to_worker(pages, input_queue, output_queue, worker):
+async def map_pages_to_worker(pages, worker, input_queue, output_queue):
     """The job of this function is to start the workers. When the workers 
     job is done and the input queue is empty, close the workers."""
     task_list = []
@@ -224,9 +223,11 @@ async def main():
             pages.append(page)
             await asyncio.sleep(2)
         
-        await map_pages_to_worker(pages, search_queries_queue, business_links_queue, search_worker)
+        await map_pages_to_worker(pages, search_worker, search_queries_queue, business_links_queue)
         logging.info(f"Num of business links: {business_links_queue.qsize()}")
-        
+        await map_pages_to_worker(pages, page_source_worker, business_links_queue, page_source_queue)
+        logging.info(f"Num of page sources: {page_source_queue.qsize()}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
