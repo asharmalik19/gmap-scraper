@@ -143,7 +143,7 @@ def create_search_queries() -> asyncio.Queue:
 
 
 @stamina.retry(on=Exception, attempts=2)
-async def get_business_page_source(page, link):
+async def get_business_page_source(page, link) -> str | None:
     try:
         await page.goto(link, timeout=30000)
     except Exception as e:
@@ -161,10 +161,8 @@ async def search(page, search_query) -> list[str] | None:
     try:
         await page.locator(FEED_SELECTOR).wait_for(timeout=30000)
         logging.info(f"Search Results found for {search_query}")
-        print(f"Search Results found for {search_query}")
     except TimeoutError:
         logging.warning(f"Search '{search_query}' returned no results - skipping query: Invalid case")
-        print(f"Search '{search_query}' returned no results - skipping query: Invalid case")
         return None
     await scroll(page)
     business_links = await get_links(page)
@@ -192,8 +190,9 @@ async def page_source_worker(page, business_links_queue, page_source_queue):
         if link is None:
             break
         page_source = await get_business_page_source(page, link)
-        logging.info(f"Successfully fetched page source for {link}")
-        await page_source_queue.put(page_source)
+        if page_source:
+            logging.info(f"Successfully fetched page source for {link}")
+            await page_source_queue.put(page_source)
         business_links_queue.task_done()
 
 
@@ -216,7 +215,7 @@ async def main():
     business_links_queue = asyncio.Queue()
     page_source_queue = asyncio.Queue()
     logging.info(f"Processing search queries: {search_queries_queue.qsize()}")  
-    async with AsyncCamoufox(headless=False) as browser:
+    async with AsyncCamoufox(headless=True) as browser:
         pages = []
         for _ in range(NUMBER_OF_PAGES):
             page = await browser.new_page()
@@ -227,7 +226,11 @@ async def main():
         logging.info(f"Num of business links: {business_links_queue.qsize()}")
         await map_pages_to_worker(pages, page_source_worker, business_links_queue, page_source_queue)
         logging.info(f"Num of page sources: {page_source_queue.qsize()}")
+    
 
 
 if __name__ == "__main__":
+    start_time = time.time()
     asyncio.run(main())
+    end_time = time.time()
+    logging.info(f"Total time taken: {end_time - start_time}")
