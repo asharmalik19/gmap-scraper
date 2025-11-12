@@ -7,8 +7,8 @@ import random
 from bs4 import BeautifulSoup
 import stamina
 import pandas as pd
-from camoufox.async_api import AsyncCamoufox
 from playwright.async_api import TimeoutError
+from playwright.async_api import async_playwright
 
 
 logging.basicConfig(
@@ -215,7 +215,8 @@ async def main():
     business_links_queue = asyncio.Queue()
     page_source_queue = asyncio.Queue()
     logging.info(f"Processing search queries: {search_queries_queue.qsize()}")  
-    async with AsyncCamoufox(headless=True) as browser:
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(channel="chrome", headless=True)
         pages = []
         for _ in range(NUMBER_OF_PAGES):
             page = await browser.new_page()
