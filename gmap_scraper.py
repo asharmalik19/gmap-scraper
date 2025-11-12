@@ -21,7 +21,7 @@ logging.basicConfig(
 
 BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
 FEED_SELECTOR = "div[role=feed]"
-NUMBER_OF_PAGES = 4
+NUMBER_OF_PAGES = 8
 
 
 async def get_links(page):
