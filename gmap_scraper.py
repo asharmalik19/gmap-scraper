@@ -226,7 +226,15 @@ async def main():
         logging.info(f"Num of business links: {business_links_queue.qsize()}")
         await map_pages_to_worker(pages, page_source_worker, business_links_queue, page_source_queue)
         logging.info(f"Num of page sources: {page_source_queue.qsize()}")
-    
+
+    parsed_businesses = []
+    for _ in range(page_source_queue.qsize()):
+        page_source = await page_source_queue.get()
+        business_info = scrape_business_details(page_source)
+        parsed_businesses.append(business_info)
+    df = pd.DataFrame(parsed_businesses)
+    df.to_csv("g_map_scraper_output.csv", index=False)
+    logging.info(f"Output saved to g_map_scraper_output.csv")
 
 
 if __name__ == "__main__":
