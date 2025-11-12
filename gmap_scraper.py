@@ -1,7 +1,7 @@
 import re
 import asyncio
 import logging
-import time
+from datetime import datetime
 import random
 
 from bs4 import BeautifulSoup
@@ -230,7 +230,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    start_time = time.time()
+    start_time = datetime.now()
     asyncio.run(main())
-    end_time = time.time()
+    end_time = datetime.now()
     logging.info(f"Total time taken: {end_time - start_time}")
