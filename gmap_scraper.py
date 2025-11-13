@@ -15,13 +15,13 @@ logging.basicConfig(
     filename="gmap_scraper.log",
     filemode="w",
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
 
 BUSINESS_TITLE_SELECTOR = "h1.DUwDvf.lfPIob"
 FEED_SELECTOR = "div[role=feed]"
-NUMBER_OF_PAGES = 8
+NUMBER_OF_PAGES = 4
 
 
 async def get_links(page):
@@ -142,14 +142,14 @@ def create_search_queries() -> asyncio.Queue:
     return search_queries
 
 
-@stamina.retry(on=Exception, attempts=2)
+# @stamina.retry(on=Exception, attempts=2)
 async def get_business_page_source(page, link) -> str | None:
     try:
-        await page.goto(link, timeout=30000)
+        await page.goto(link, timeout=30000, wait_until="domcontentloaded")
     except Exception as e:
         logging.error(f"Error while navigating to the page link: {link}: {e}")
         return None
-    await page.locator(BUSINESS_TITLE_SELECTOR).wait_for()
+    await page.locator(BUSINESS_TITLE_SELECTOR).wait_for(timeout=30000)
     return await page.content()
 
 
@@ -162,7 +162,9 @@ async def search(page, search_query) -> list[str] | None:
         await page.locator(FEED_SELECTOR).wait_for(timeout=30000)
         logging.info(f"Search Results found for {search_query}")
     except TimeoutError:
-        logging.warning(f"Search '{search_query}' returned no results - skipping query: Invalid case")
+        logging.warning(
+            f"Search '{search_query}' returned no results - skipping query: Invalid case"
+        )
         return None
     await scroll(page)
     business_links = await get_links(page)
@@ -183,7 +185,7 @@ async def search_worker(page, search_queries_queue, business_links_queue):
                 await business_links_queue.put(link)
         search_queries_queue.task_done()
 
-    
+
 async def page_source_worker(page, business_links_queue, page_source_queue):
     while True:
         link = await business_links_queue.get()
@@ -197,7 +199,7 @@ async def page_source_worker(page, business_links_queue, page_source_queue):
 
 
 async def map_pages_to_worker(pages, worker, input_queue, output_queue):
-    """The job of this function is to start the workers. When the workers 
+    """The job of this function is to start the workers. When the workers
     job is done and the input queue is empty, close the workers."""
     task_list = []
     for page in pages:
@@ -214,7 +216,7 @@ async def main():
     search_queries_queue = create_search_queries()
     business_links_queue = asyncio.Queue()
     page_source_queue = asyncio.Queue()
-    logging.info(f"Processing search queries: {search_queries_queue.qsize()}")  
+    logging.info(f"Processing search queries: {search_queries_queue.qsize()}")
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
         pages = []
@@ -222,10 +224,14 @@ async def main():
             page = await browser.new_page()
             pages.append(page)
             await asyncio.sleep(2)
-        
-        await map_pages_to_worker(pages, search_worker, search_queries_queue, business_links_queue)
+
+        await map_pages_to_worker(
+            pages, search_worker, search_queries_queue, business_links_queue
+        )
         logging.info(f"Num of business links: {business_links_queue.qsize()}")
-        await map_pages_to_worker(pages, page_source_worker, business_links_queue, page_source_queue)
+        await map_pages_to_worker(
+            pages, page_source_worker, business_links_queue, page_source_queue
+        )
         logging.info(f"Num of page sources: {page_source_queue.qsize()}")
 
     parsed_businesses = []
