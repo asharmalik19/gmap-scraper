@@ -8,6 +8,6 @@ dependencies = [
     "beautifulsoup4>=4.14.2",
     "black>=25.9.0",
     "pandas>=2.3.3",
-    "playwright>=1.56.0",
+    "patchright>=1.56.0",
     "stamina>=25.1.0",
 ]

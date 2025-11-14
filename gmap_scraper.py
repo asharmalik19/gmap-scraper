@@ -7,8 +7,8 @@ import random
 from bs4 import BeautifulSoup
 import stamina
 import pandas as pd
-from playwright.async_api import TimeoutError
-from playwright.async_api import async_playwright
+from patchright.async_api import TimeoutError
+from patchright.async_api import async_playwright
 
 
 logging.basicConfig(
@@ -218,7 +218,10 @@ async def main():
     page_source_queue = asyncio.Queue()
     logging.info(f"Processing search queries: {search_queries_queue.qsize()}")
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(channel="chrome", headless=True)
+        browser = await playwright.chromium.launch(
+            channel="chrome",
+            headless=False,
+        )
         pages = []
         for _ in range(NUMBER_OF_PAGES):
             page = await browser.new_page()
