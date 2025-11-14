@@ -12,10 +12,12 @@ from patchright.async_api import async_playwright
 
 
 logging.basicConfig(
-    filename="gmap_scraper.log",
-    filemode="w",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("gmap_scraper.log", mode="w"),
+        logging.StreamHandler(),
+    ]
 )
 
 
@@ -220,7 +222,7 @@ async def main():
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
             channel="chrome",
-            headless=False,
+            headless=True,
         )
         pages = []
         for _ in range(NUMBER_OF_PAGES):
