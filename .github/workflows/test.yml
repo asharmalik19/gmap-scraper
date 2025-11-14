@@ -9,4 +9,10 @@ jobs:
     - uses: astral-sh/setup-uv@v7
     - run: uv sync
     - run: uv run patchright install chromium
+    - run: |
+        echo "coffee
+        plumber" > keywords.txt
+        echo "City,State,Country
+        Baltimore,MD,USA
+        Columbia,MD,USA" > locations.csv
     - run: uv run gmap_scraper.py
