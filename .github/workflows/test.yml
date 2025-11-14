@@ -10,9 +10,11 @@ jobs:
     - run: uv sync
     - run: uv run patchright install chromium
     - run: |
-        echo "coffee
-        plumber" > keywords.txt
+        echo "Fitness Studio
+        Gym" > keywords.txt
         echo "City,State,Country
         Baltimore,MD,USA
-        Columbia,MD,USA" > locations.csv
+        Columbia,MD,USA
+        Frederick,MD,USA
+        Rockville,MD,USA" > locations.csv
     - run: uv run gmap_scraper.py
