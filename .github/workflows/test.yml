@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v5
-    - uses: astral-sh/setup-uv
+    - uses: astral-sh/setup-uv@v7
     - run: uv sync
     - run: uv run patchright install chromium
     - run: uv run gmap_scraper.py
