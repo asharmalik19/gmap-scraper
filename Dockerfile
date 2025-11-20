@@ -16,7 +16,7 @@ RUN uv sync
 
 # 6. Install Patchright's specific browsers
 # (We do this here so they are baked into the image)
-RUN uv run patchright install chromium
+RUN uv run patchright install chrome
 
 # 7. The command that runs when you start the container
 CMD ["uv", "run", "gmap_scraper.py"]
