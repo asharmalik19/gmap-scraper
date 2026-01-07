@@ -10,6 +10,9 @@ import pandas as pd
 from patchright.async_api import TimeoutError
 from patchright.async_api import async_playwright
 
+# TODO: De-duplication of businesses based on the link
+# TODO: Make it faster to scrape approx 3k/1h or 70k/1d
+
 
 logging.basicConfig(
     level=logging.INFO,
