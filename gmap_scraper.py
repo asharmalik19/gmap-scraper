@@ -245,8 +245,8 @@ async def main():
         business_info = scrape_business_details(page_source)
         parsed_businesses.append(business_info)
     df = pd.DataFrame(parsed_businesses)
-    df.to_csv("g_map_scraper_output.csv", index=False)
-    logging.info(f"Output saved to g_map_scraper_output.csv")
+    df.to_csv("gmap_scraper_output.csv", index=False)
+    logging.info(f"Output saved to gmap_scraper_output.csv")
 
 
 if __name__ == "__main__":
