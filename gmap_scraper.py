@@ -39,14 +39,18 @@ async def scroll(page):
     """Scrolls through the page until the end. Google maps scroll can sometimes
     get stuck"""
     sidebar = page.locator(FEED_SELECTOR)
+    scroll_count = 0
     while True:
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
         await sidebar.press("PageDown")
         await page.wait_for_timeout(500)
         await asyncio.sleep(random.uniform(5, 7))
+        scroll_count += 1
         if "reached the end of the list" in await page.content():
+            logging.info(f"Reached end of list after {scroll_count} scrolls")
             break
+        logging.info(f"Scroll {scroll_count} — still loading results...")
     return
 
 
@@ -150,7 +154,7 @@ def create_search_queries() -> asyncio.Queue:
 # @stamina.retry(on=Exception, attempts=2)
 async def get_business_page_source(page, link) -> str | None:
     try:
-        await page.goto(link, timeout=30000, wait_until="domcontentloaded")
+        await page.goto(link, timeout=30000, wait_until="documentloaded")
     except Exception as e:
         logging.error(f"Error while navigating to the page link: {link}: {e}")
         return None
@@ -159,8 +163,9 @@ async def get_business_page_source(page, link) -> str | None:
 
 
 async def search(page, search_query) -> list[str] | None:
+    logging.info(f"Searching: {search_query}")
     await page.goto("https://www.google.com/maps")
-    await page.fill("#searchboxinput", search_query)
+    await page.fill("input[role='combobox']", search_query)
     await page.keyboard.press("Enter")
     await page.wait_for_load_state("load")
     try:
@@ -227,10 +232,12 @@ async def main():
             channel="chrome",
             headless=True,
         )
+        logging.info("Browser launched")
         pages = []
-        for _ in range(NUMBER_OF_PAGES):
+        for i in range(NUMBER_OF_PAGES):
             page = await browser.new_page()
             pages.append(page)
+            logging.info(f"Opened page {i + 1}/{NUMBER_OF_PAGES}")
             await asyncio.sleep(2)
 
         await map_pages_to_worker(
