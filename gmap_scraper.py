@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 import stamina
 import pandas as pd
 from patchright.async_api import TimeoutError
-from patchright.async_api import async_playwright
+from cloakbrowser import launch_async
 
 # TODO: De-duplication of businesses based on the link
 # TODO: Make it faster to scrape approx 3k/1h or 70k/1d
@@ -227,11 +227,9 @@ async def main():
     business_links_queue = asyncio.Queue()
     page_source_queue = asyncio.Queue()
     logging.info(f"Processing search queries: {search_queries_queue.qsize()}")
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            channel="chrome",
-            headless=True,
-        )
+    async with await launch_async(
+        headless=False,
+        ) as browser:
         logging.info("Browser launched")
         pages = []
         for i in range(NUMBER_OF_PAGES):
