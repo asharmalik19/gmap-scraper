@@ -154,7 +154,7 @@ def create_search_queries() -> asyncio.Queue:
 # @stamina.retry(on=Exception, attempts=2)
 async def get_business_page_source(page, link) -> str | None:
     try:
-        await page.goto(link, timeout=30000, wait_until="documentloaded")
+        await page.goto(link, timeout=30000, wait_until="domcontentloaded")
     except Exception as e:
         logging.error(f"Error while navigating to the page link: {link}: {e}")
         return None
@@ -196,7 +196,7 @@ async def search_worker(page, search_queries_queue, business_links_queue):
         search_queries_queue.task_done()
 
 
-async def page_source_worker(page, business_links_queue, page_source_queue):
+async def page_source_worker(page, business_links_queue, business_info_queue):
     while True:
         link = await business_links_queue.get()
         if link is None:
@@ -204,7 +204,8 @@ async def page_source_worker(page, business_links_queue, page_source_queue):
         page_source = await get_business_page_source(page, link)
         if page_source:
             logging.info(f"Successfully fetched page source for {link}")
-            await page_source_queue.put(page_source)
+            business_info = scrape_business_details(page_source)
+            await business_info_queue.put(business_info)
         business_links_queue.task_done()
 
 
@@ -225,10 +226,10 @@ async def main():
     logging.basicConfig(filename="g_map_scraper.log", filemode="w", level=logging.INFO)
     search_queries_queue = create_search_queries()
     business_links_queue = asyncio.Queue()
-    page_source_queue = asyncio.Queue()
+    business_info_queue = asyncio.Queue()
     logging.info(f"Processing search queries: {search_queries_queue.qsize()}")
     async with await launch_async(
-        headless=False,
+        headless=True,
         ) as browser:
         logging.info("Browser launched")
         pages = []
@@ -243,14 +244,13 @@ async def main():
         )
         logging.info(f"Num of business links: {business_links_queue.qsize()}")
         await map_pages_to_worker(
-            pages, page_source_worker, business_links_queue, page_source_queue
+            pages, page_source_worker, business_links_queue, business_info_queue
         )
-        logging.info(f"Num of page sources: {page_source_queue.qsize()}")
+        logging.info(f"Num of business infos: {business_info_queue.qsize()}")
 
     parsed_businesses = []
-    for _ in range(page_source_queue.qsize()):
-        page_source = await page_source_queue.get()
-        business_info = scrape_business_details(page_source)
+    for _ in range(business_info_queue.qsize()):
+        business_info = await business_info_queue.get()
         parsed_businesses.append(business_info)
     df = pd.DataFrame(parsed_businesses)
     df.to_csv("gmap_scraper_output.csv", index=False)
